@@ -4,6 +4,10 @@
 var Fs = require("fs");
 var Os = require("os");
 var Curry = require("bs-platform/lib/js/curry.js");
+var Belt_Int = require("bs-platform/lib/js/belt_Int.js");
+var Belt_Array = require("bs-platform/lib/js/belt_Array.js");
+var Caml_array = require("bs-platform/lib/js/caml_array.js");
+var Belt_Option = require("bs-platform/lib/js/belt_Option.js");
 
 var getToday = (function() {
   let date = new Date();
@@ -14,18 +18,226 @@ var getToday = (function() {
 
 var encoding = "utf8";
 
-console.log("Hello! today is " + Curry._1(getToday, undefined));
+var pending_todos_file = process.cwd() + "/todo.txt";
 
-if (Fs.existsSync("todo.txt")) {
-  console.log("Todo file exists.");
-} else {
-  Fs.writeFileSync("todo.txt", "This is todo!" + Os.EOL, {
+var completed_todos_file = process.cwd() + "/done.txt";
+
+var help_text = "Usage :-\n$ ./todo add \"todo item\"  # Add a new todo\n$ ./todo ls               # Show remaining todos\n$ ./todo del NUMBER       # Delete a todo\n$ ./todo done NUMBER      # Complete a todo\n$ ./todo help             # Show usage\n$ ./todo report           # Statistics";
+
+function parseCommand(cmnd) {
+  var cmnd$1 = cmnd.trim().toLocaleLowerCase();
+  switch (cmnd$1) {
+    case "add" :
+        return /* Add */2;
+    case "del" :
+        return /* Del */3;
+    case "done" :
+        return /* Done */4;
+    case "help" :
+        return /* Help */0;
+    case "ls" :
+        return /* Ls */1;
+    case "report" :
+        return /* Report */5;
+    default:
+      return /* Help */0;
+  }
+}
+
+function readFile(filename) {
+  if (!Fs.existsSync(filename)) {
+    return ;
+  }
+  var text = Fs.readFileSync(filename, {
+        encoding: encoding,
+        flag: "r"
+      });
+  var lines = text.split(Os.EOL);
+  return lines.filter(function (todo) {
+              return todo !== "";
+            });
+}
+
+function writeFile(filename, lines) {
+  if (lines.length === 1) {
+    var text = Caml_array.get(lines, 0) + Os.EOL;
+    Fs.writeFileSync(filename, text, {
+          encoding: encoding,
+          flag: "w"
+        });
+    return ;
+  }
+  var text$1 = lines.join(Os.EOL);
+  Fs.writeFileSync(filename, text$1, {
         encoding: encoding,
         flag: "w"
       });
-  console.log("Todo file created.");
+  
+}
+
+function appendFile(filename, content) {
+  Fs.appendFileSync(filename, content + Os.EOL, {
+        encoding: encoding,
+        flag: "a"
+      });
+  
+}
+
+function updateFile(filename, updateFn) {
+  var todos = readFile(filename);
+  if (todos === undefined) {
+    return ;
+  }
+  var new_todos = Curry._1(updateFn, todos);
+  return writeFile(pending_todos_file, new_todos);
+}
+
+function printHelp(param) {
+  console.log(help_text);
+  
+}
+
+function showRemainingTodos(param) {
+  var todos = readFile(pending_todos_file);
+  if (todos !== undefined) {
+    if (todos.length === 0) {
+      console.log("There are no pending todos!");
+      return ;
+    }
+    var todos$1 = Belt_Array.reverse(todos.map(function (todo, index) {
+              return "[" + String(index + 1 | 0) + "] " + todo;
+            }));
+    console.log(Belt_Array.reduce(todos$1, "", (function (acc, todo) {
+                return acc + (todo + "\n");
+              })));
+    return ;
+  }
+  console.log("There are no pending todos!");
+  
+}
+
+function addTodo(param) {
+  try {
+    var todo = Caml_array.get(process.argv, 3);
+    appendFile(pending_todos_file, todo);
+    console.log("Added todo: \"" + todo + "\"");
+    return ;
+  }
+  catch (exn){
+    console.log("Error: Missing todo string. Nothing added!");
+    return ;
+  }
+}
+
+function delTodo(param) {
+  try {
+    var cmdArg = Caml_array.get(process.argv, 3);
+    var number = Belt_Option.getWithDefault(Belt_Int.fromString(cmdArg), 0);
+    if (Fs.existsSync(pending_todos_file)) {
+      return updateFile(pending_todos_file, (function (todos) {
+                    if (number < 1 || number > todos.length) {
+                      console.log("Error: todo #" + String(number) + " does not exist. Nothing deleted.");
+                      return todos;
+                    }
+                    var todos$1 = todos.filter(function (param, index) {
+                          return (index + 1 | 0) !== number;
+                        });
+                    console.log("Deleted todo #" + String(number));
+                    return todos$1;
+                  }));
+    } else {
+      console.log("Error: todo #" + String(number) + " does not exist. Nothing deleted.");
+      return ;
+    }
+  }
+  catch (exn){
+    console.log("Error: Missing NUMBER for deleting todo.");
+    return ;
+  }
+}
+
+function markDone(param) {
+  try {
+    var cmdArg = Caml_array.get(process.argv, 3);
+    var number = Belt_Option.getWithDefault(Belt_Int.fromString(cmdArg), 0);
+    var todos = readFile(pending_todos_file);
+    if (todos !== undefined) {
+      if (number < 1 || number > todos.length) {
+        console.log("Error: todo #" + String(number) + " does not exist. Nothing Marked as done.");
+        return ;
+      }
+      var completedTodo = Caml_array.get(todos, number - 1 | 0);
+      var todos$1 = todos.filter(function (param, index) {
+            return index !== (number - 1 | 0);
+          });
+      writeFile(pending_todos_file, todos$1);
+      appendFile(completed_todos_file, "x " + Curry._1(getToday, undefined) + " " + completedTodo);
+      console.log("Marked todo #" + String(number) + " as done.");
+      return ;
+    }
+    console.log("There are no pending todos!");
+    return ;
+  }
+  catch (exn){
+    console.log("Error: Missing NUMBER for marking todo as done.");
+    return ;
+  }
+}
+
+function reportOfTodos(param) {
+  var pendingTodos = Belt_Option.getWithDefault(Belt_Option.map(readFile(pending_todos_file), (function (num) {
+              return num.length;
+            })), 0);
+  var completedTodos = Belt_Option.getWithDefault(Belt_Option.map(readFile(completed_todos_file), (function (num) {
+              return num.length;
+            })), 0);
+  console.log(Curry._1(getToday, undefined) + " Pending : " + String(pendingTodos) + " Completed : " + String(completedTodos));
+  
+}
+
+try {
+  var cmnd = Caml_array.get(process.argv, 2);
+  var cmnd$1 = parseCommand(cmnd);
+  switch (cmnd$1) {
+    case /* Help */0 :
+        console.log(help_text);
+        break;
+    case /* Ls */1 :
+        showRemainingTodos(undefined);
+        break;
+    case /* Add */2 :
+        addTodo(undefined);
+        break;
+    case /* Del */3 :
+        delTodo(undefined);
+        break;
+    case /* Done */4 :
+        markDone(undefined);
+        break;
+    case /* Report */5 :
+        reportOfTodos(undefined);
+        break;
+    
+  }
+}
+catch (exn){
+  console.log(help_text);
 }
 
 exports.getToday = getToday;
 exports.encoding = encoding;
-/*  Not a pure module */
+exports.pending_todos_file = pending_todos_file;
+exports.completed_todos_file = completed_todos_file;
+exports.help_text = help_text;
+exports.parseCommand = parseCommand;
+exports.readFile = readFile;
+exports.writeFile = writeFile;
+exports.appendFile = appendFile;
+exports.updateFile = updateFile;
+exports.printHelp = printHelp;
+exports.showRemainingTodos = showRemainingTodos;
+exports.addTodo = addTodo;
+exports.delTodo = delTodo;
+exports.markDone = markDone;
+exports.reportOfTodos = reportOfTodos;
+/* pending_todos_file Not a pure module */
